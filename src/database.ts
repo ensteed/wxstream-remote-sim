@@ -1,5 +1,5 @@
 import { MongoClient, Db, Collection } from "mongodb";
-import { config } from "../../../.emacs.d/backup/!home!dprandle!projects!wxstream-remote-sim!src!config.ts~";
+import { config } from "./config.js";
 
 export interface raw_audio_entry {
     site_id: string;

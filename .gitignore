@@ -1,0 +1,4 @@
+.env
+.prettier*
+node_modules
+streams

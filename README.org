@@ -1,0 +1,169 @@
+#+TITLE: Site Simulation Runner
+#+AUTHOR: 
+#+OPTIONS: toc:2
+
+* 🛰️ Site Simulation Runner
+
+This script starts simulation processes for multiple remote sites using a shared configuration file.
+
+It also *resets all data (MongoDB + AWS audio)* before starting, or that step can be skipped by passing --no-reset-data when starting this simulation.
+
+---
+
+* 📦 Overview
+
+- Reads a list of site IDs from =sites.conf=
+- Starts one Node.js process per site
+- Runs all processes in parallel
+- Cleans up all processes on exit (Ctrl+C)
+
+---
+
+* 🚀 Usage
+
+** Start simulation (with data reset)
+#+begin_src bash
+./start-sites.sh
+#+end_src
+
+This will:
+1. Reset the database
+2. Clear AWS audio data
+3. Start all site simulations
+
+---
+
+** Start simulation (without resetting data)
+#+begin_src bash
+./start-sites.sh --no-reset-data
+#+end_src
+
+This will:
+- Skip all reset steps
+- Immediately start site simulations
+
+---
+
+* ⚠️ Important Behavior
+
+** Data Reset (default behavior)
+
+When run *without arguments*, the script will:
+
+- Run:
+#+begin_src bash
+admin_tools/run-script.sh resetdb.js
+#+end_src
+
+- Run:
+#+begin_src bash
+admin_tools/clear-aws-audio.sh
+#+end_src
+
+This clears:
+- MongoDB data
+- AWS audio data
+
+→ This happens *once before all sites start*, not per-site.
+
+---
+
+* 📄 Site Configuration
+
+Sites are defined in:
+
+#+begin_src
+sites.conf
+#+end_src
+
+** Example:
+#+begin_src text
+KJFK
+KLAX
+KATL
+
+# KSEA (commented out)
+#+end_src
+
+** Rules:
+- One site per line
+- Blank lines are ignored
+- Lines starting with =#= are ignored
+
+---
+
+* 🧠 How It Works
+
+For each site:
+
+#+begin_src bash
+node dist/main.js <SITE_ID>
+#+end_src
+
+All processes are started in the background and run concurrently.
+
+---
+
+* 🛑 Stopping the Simulation
+
+Press:
+
+#+begin_src
+Ctrl + C
+#+end_src
+
+This will:
+- Trigger cleanup
+- Kill all running site processes
+- Exit cleanly
+
+You’ll see:
+#+begin_src text
+Stopping all site simulators...
+#+end_src
+
+---
+
+* 📁 Project Structure (relevant parts)
+
+#+begin_src text
+.
+├── start-sites.sh
+├── sites.conf
+├── dist/
+│   └── main.js
+├── admin_tools/
+│   ├── run-script.sh
+│   ├── resetdb.js
+│   └── clear-aws-audio.sh
+#+end_src
+
+---
+
+* ⚙️ Requirements
+
+- Node.js (accessible via =node=)
+- MongoDB access configured in =run-script.sh=
+- AWS CLI configured (for audio clearing)
+- All scripts executable:
+
+#+begin_src bash
+chmod +x start-sites.sh
+#+end_src
+
+---
+
+* 💡 Notes
+
+- Paths are resolved relative to the script location (safe to run from anywhere)
+- All site processes share the same parent script and lifecycle
+- If the script exits for any reason, all site processes are terminated
+
+---
+
+* 👍 Summary
+
+| Command                                   | Behavior                          |
+|------------------------------------------+-----------------------------------|
+| =./start-sites.sh=                        | Reset data, then start all sites  |
+| =./start-sites.sh --no-reset-data=        | Skip reset, start all sites       |

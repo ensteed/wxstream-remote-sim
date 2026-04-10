@@ -84,8 +84,8 @@ async function flush_chunk(
         recorded: chunk_start_time,
         bucket: config.aws.bucket,
         object_key: objectKey,
-        created: now,
-        last_update: now,
+        created_at: now,
+        updated_at: now,
     });
 
     console.log(`[db] Inserted raw audio entry for key: ${objectKey}`);

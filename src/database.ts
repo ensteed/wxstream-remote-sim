@@ -9,8 +9,8 @@ export interface raw_audio_entry {
     recorded: Date;
     bucket: string;
     object_key: string;
-    created: Date;
-    last_update: Date;
+    created_at: Date;
+    updated_at: Date;
 }
 
 // The only parameters we care about

@@ -2,11 +2,11 @@
   "name": "wxstream-remote-sim",
   "version": "1.0.0",
   "description": "Weather stream audio simulator — chunks audio on silence and uploads to S3/MongoDB",
-  "main": "dist/index.js",
+  "main": "dist/main.js",
   "scripts": {
-    "build": "tsc",
-    "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts"
+    "build": "rm -r dist && tsc",
+    "start": "node dist/main.js",
+    "dev": "ts-node src/main.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.600.0",

@@ -6,9 +6,9 @@ import { upload_chunk } from "./uploader.js";
 import { insert_raw_audio_entry } from "./database.js";
 
 interface wav_info {
-    sampleRate: number;
-    numChannels: number;
-    bitsPerSample: number;
+    sample_rate: number;
+    num_channels: number;
+    bits_per_sample: number;
     samples: number[]; // interleaved samples, normalised to 16-bit range [-32768, 32767]
 }
 
@@ -21,40 +21,36 @@ function load_wav(filePath: string): wav_info {
         numChannels: number;
         bitsPerSample: number;
     };
-
-    const sampleRate: number = fmt.sampleRate;
-    const numChannels: number = fmt.numChannels;
-    const bitsPerSample: number = fmt.bitsPerSample;
-
     // getSamples(true) returns a single interleaved typed array
-    const raw = wav.getSamples(true, Int16Array) as unknown as Int16Array;
+    const raw = wav.getSamples(true, Int16Array);
     const samples: number[] = Array.from(raw);
-
-    return { sampleRate, numChannels, bitsPerSample, samples };
+    return { sample_rate: fmt.sampleRate, num_channels: fmt.numChannels, bits_per_sample: fmt.bitsPerSample, samples };
 }
 
-function build_wav(samples: number[], sampleRate: number, numChannels: number, bitsPerSample: number): Buffer {
+function build_wav(samples: number[], sample_rate: number, num_channels: number, bits_per_sample: number): Buffer {
     const wav = new WaveFile();
     // Split interleaved samples back into per-channel arrays
-    const totalFrames = samples.length / numChannels;
-    const channels: Int16Array[] = Array.from({ length: numChannels }, () => new Int16Array(totalFrames));
+    const totalFrames = samples.length / num_channels;
+    const channels: Int16Array[] = Array.from({ length: num_channels }, () => new Int16Array(totalFrames));
     for (let frame = 0; frame < totalFrames; frame++) {
-        for (let ch = 0; ch < numChannels; ch++) {
-            channels[ch][frame] = samples[frame * numChannels + ch];
+        for (let ch = 0; ch < num_channels; ch++) {
+            channels[ch][frame] = samples[frame * num_channels + ch];
         }
     }
-    wav.fromScratch(numChannels, sampleRate, String(bitsPerSample) as "16", channels);
+    wav.fromScratch(num_channels, sample_rate, String(bits_per_sample) as "16", channels);
     return Buffer.from(wav.toBuffer());
 }
 
-function compute_rms(samples: number[], numChannels: number): number {
+function compute_rms(samples: number[], num_channels: number): number {
     if (samples.length === 0) return 0;
     // Average RMS across all channels in the window
     let sum = 0;
     for (const s of samples) {
         sum += s * s;
     }
-    return Math.sqrt(sum / samples.length);
+    const rms_v = Math.sqrt(sum / samples.length);
+    const rms_db = 20 * Math.log10(rms_v / 32768);
+    return rms_db;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -62,29 +58,29 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function flush_chunk(
-    siteId: string,
-    chunkSamples: number[],
-    chunkStartTime: Date,
-    sampleRate: number,
-    numChannels: number,
-    bitsPerSample: number
+    site_id: string,
+    chunk_samples: number[],
+    chunk_start_time: Date,
+    sample_rate: number,
+    num_channels: number,
+    bits_per_sample: number
 ): Promise<void> {
-    if (chunkSamples.length === 0) return;
+    if (chunk_samples.length === 0) return;
 
-    const wavBuffer = build_wav(chunkSamples, sampleRate, numChannels, bitsPerSample);
+    const wavBuffer = build_wav(chunk_samples, sample_rate, num_channels, bits_per_sample);
 
     console.log(
-        `[proc] Flushing chunk: ${chunkSamples.length / numChannels} frames` +
-            ` (~${((chunkSamples.length / numChannels / sampleRate) * 1000).toFixed(0)} ms)` +
-            ` recorded at ${chunkStartTime.toISOString()}`
+        `[proc] Flushing chunk: ${chunk_samples.length / num_channels} frames` +
+            ` (~${((chunk_samples.length / num_channels / sample_rate) * 1000).toFixed(0)} ms)` +
+            ` recorded at ${chunk_start_time.toISOString()}`
     );
 
     const now = new Date();
-    const objectKey = await upload_chunk(siteId, chunkStartTime, wavBuffer);
+    const objectKey = await upload_chunk(site_id, chunk_start_time, wavBuffer);
 
     await insert_raw_audio_entry({
-        site_id: siteId,
-        recorded: chunkStartTime,
+        site_id: site_id,
+        recorded: chunk_start_time,
         bucket: config.aws.bucket,
         object_key: objectKey,
         created: now,
@@ -95,82 +91,82 @@ async function flush_chunk(
 }
 
 export async function process_audio_file(siteId: string): Promise<void> {
-    const streamsDir = path.resolve(process.cwd(), "streams");
-    const audioFile = path.join(streamsDir, `${siteId}.wav`);
+    const streams_dir = path.resolve(process.cwd(), "streams");
+    const audio_file = path.join(streams_dir, `${siteId}.wav`);
 
-    if (!fs.existsSync(audioFile)) {
-        throw new Error(`Audio file not found: ${audioFile}`);
+    if (!fs.existsSync(audio_file)) {
+        throw new Error(`Audio file not found: ${audio_file}`);
     }
 
-    console.log(`[proc] Loading audio file: ${audioFile}`);
-    const { sampleRate, numChannels, bitsPerSample, samples } = load_wav(audioFile);
+    console.log(`[proc] Loading audio file: ${audio_file}`);
+    const { sample_rate: sample_rate, num_channels: num_channels, bits_per_sample: bitsPerSample, samples } = load_wav(audio_file);
 
     const {
-        silence_threshold_ms: silenceThresholdMs,
-        rms_silence_threshold: rmsSilenceThreshold,
-        processing_window_ms: processingWindowMs,
+        silence_threshold_ms: silence_threshold_ms,
+        rms_silence_threshold: rms_silence_threshold,
+        processing_window_ms: processing_window_ms,
     } = config.audio;
 
-    const framesPerWindow = Math.floor((sampleRate * processingWindowMs) / 1000);
-    const samplesPerWindow = framesPerWindow * numChannels;
-    const silenceWindowsNeeded = Math.ceil(silenceThresholdMs / processingWindowMs);
+    const frames_per_window = Math.floor((sample_rate * processing_window_ms) / 1000);
+    const samples_per_window = frames_per_window * num_channels;
+    const silence_windows_needed = Math.ceil(silence_threshold_ms / processing_window_ms);
 
-    const totalFrames = samples.length / numChannels;
-    const durationSec = totalFrames / sampleRate;
+    const total_frames = samples.length / num_channels;
+    const duration_sec = total_frames / sample_rate;
 
     console.log(
-        `[proc] ${sampleRate} Hz, ${numChannels} ch, ${bitsPerSample}-bit` +
-            ` | ${totalFrames} frames (${durationSec.toFixed(2)}s)` +
-            ` | window: ${processingWindowMs}ms (${framesPerWindow} frames)` +
-            ` | silence: RMS<${rmsSilenceThreshold} for >${silenceThresholdMs}ms`
+        `[proc] ${sample_rate} Hz, ${num_channels} ch, ${bitsPerSample}-bit` +
+            ` | ${total_frames} frames (${duration_sec.toFixed(2)}s)` +
+            ` | window: ${processing_window_ms}ms (${frames_per_window} frames)` +
+            ` | silence: RMS<${rms_silence_threshold} for >${silence_threshold_ms}ms`
     );
 
-    let chunkSamples: number[] = [];
-    let chunkStartTime: Date | null = null;
-    let silenceWindowCount = 0;
+    let chunk_samples: number[] = [];
+    let chunk_start_time: Date | null = null;
+    let silence_window_count = 0;
 
     // Track absolute simulated time for the chunk start
-    const fileStartWallTime = Date.now();
-    let simulatedElapsedMs = 0;
+    const file_start_wall_time = Date.now();
+    let simulated_elapsed_ms = 0;
 
-    for (let offset = 0; offset < samples.length; offset += samplesPerWindow) {
-        const windowSamples = samples.slice(offset, offset + samplesPerWindow);
-        const rms = compute_rms(windowSamples, numChannels);
-        const isSilent = rms < rmsSilenceThreshold;
+    for (let offset = 0; offset < samples.length; offset += samples_per_window) {
+        const window_samples = samples.slice(offset, offset + samples_per_window);
+        const rms = compute_rms(window_samples, num_channels);
+        const is_silent = rms < rms_silence_threshold;
 
-        if (!isSilent) {
+        if (!is_silent) {
             // Audio is active — accumulate into current chunk
-            if (chunkStartTime === null) {
+            if (chunk_start_time === null) {
                 // New chunk begins; record simulated wall-clock time for this moment
-                chunkStartTime = new Date(fileStartWallTime + simulatedElapsedMs);
+                chunk_start_time = new Date(file_start_wall_time + simulated_elapsed_ms);
             }
-            chunkSamples.push(...windowSamples);
-            silenceWindowCount = 0;
+            chunk_samples.push(...window_samples);
+            silence_window_count = 0;
         } else {
             // Silent window
-            if (chunkSamples.length > 0) {
-                silenceWindowCount++;
+            if (chunk_samples.length > 0) {
+                silence_window_count++;
 
-                if (silenceWindowCount >= silenceWindowsNeeded) {
+                if (silence_window_count >= silence_windows_needed) {
                     // Silence threshold reached — flush the accumulated chunk
-                    await flush_chunk(siteId, chunkSamples, chunkStartTime!, sampleRate, numChannels, bitsPerSample);
-                    chunkSamples = [];
-                    chunkStartTime = null;
-                    silenceWindowCount = 0;
+                    await flush_chunk(siteId, chunk_samples, chunk_start_time!, sample_rate, num_channels, bitsPerSample);
+                    chunk_samples = [];
+                    chunk_start_time = null;
+                    silence_window_count = 0;
                 } else {
                     // Still within the grace period — keep accumulating silence so the
                     // chunk boundary lands at the silence start, not mid-speech
-                    chunkSamples.push(...windowSamples);
+                    chunk_samples.push(...window_samples);
                 }
             }
             // If chunkSamples is empty we're in leading silence — just advance
         }
 
-        simulatedElapsedMs += processingWindowMs;
+        simulated_elapsed_ms += processing_window_ms;
 
         // Simulate real-time pacing: sleep until the simulated time catches up to
         // the wall-clock time we should be at
-        const targetWallTime = fileStartWallTime + simulatedElapsedMs;
+        const targetWallTime = file_start_wall_time + simulated_elapsed_ms;
         const sleepMs = targetWallTime - Date.now();
         if (sleepMs > 0) {
             await sleep(sleepMs);
@@ -178,9 +174,9 @@ export async function process_audio_file(siteId: string): Promise<void> {
     }
 
     // Flush any remaining audio at end-of-file
-    if (chunkSamples.length > 0 && chunkStartTime !== null) {
+    if (chunk_samples.length > 0 && chunk_start_time !== null) {
         console.log("[proc] End of file — flushing final chunk");
-        await flush_chunk(siteId, chunkSamples, chunkStartTime, sampleRate, numChannels, bitsPerSample);
+        await flush_chunk(siteId, chunk_samples, chunk_start_time, sample_rate, num_channels, bitsPerSample);
     }
 
     console.log("[proc] Audio file processing complete.");

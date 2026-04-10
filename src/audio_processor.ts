@@ -96,7 +96,8 @@ export async function process_audio_file(
     silence_threshold_ms: number,
     rms_silence_threshold_db: number
 ): Promise<void> {
-    const streams_dir = path.resolve(process.cwd(), "streams");
+  const streams_dir = path.resolve(__dirname, "../streams");
+  console.log(`[proc] Looking for audio file in: ${streams_dir}`);
     const audio_file = path.join(streams_dir, `${site_id}.wav`);
 
     if (!fs.existsSync(audio_file)) {

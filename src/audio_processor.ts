@@ -30,9 +30,9 @@ function load_wav(filePath: string): wav_info {
 function build_wav(samples: number[], sample_rate: number, num_channels: number, bits_per_sample: number): Buffer {
     const wav = new WaveFile();
     // Split interleaved samples back into per-channel arrays
-    const totalFrames = samples.length / num_channels;
-    const channels: Int16Array[] = Array.from({ length: num_channels }, () => new Int16Array(totalFrames));
-    for (let frame = 0; frame < totalFrames; frame++) {
+    const total_frames = samples.length / num_channels;
+    const channels: Int16Array[] = Array.from({ length: num_channels }, () => new Int16Array(total_frames));
+    for (let frame = 0; frame < total_frames; frame++) {
         for (let ch = 0; ch < num_channels; ch++) {
             channels[ch][frame] = samples[frame * num_channels + ch];
         }
@@ -80,6 +80,7 @@ async function flush_chunk(
 
     await insert_raw_audio_entry({
         site_id: site_id,
+        type: "raw",
         recorded: chunk_start_time,
         bucket: config.aws.bucket,
         object_key: objectKey,
@@ -90,22 +91,22 @@ async function flush_chunk(
     console.log(`[db] Inserted raw audio entry for key: ${objectKey}`);
 }
 
-export async function process_audio_file(siteId: string): Promise<void> {
+export async function process_audio_file(
+    site_id: string,
+    silence_threshold_ms: number,
+    rms_silence_threshold_db: number
+): Promise<void> {
     const streams_dir = path.resolve(process.cwd(), "streams");
-    const audio_file = path.join(streams_dir, `${siteId}.wav`);
+    const audio_file = path.join(streams_dir, `${site_id}.wav`);
 
     if (!fs.existsSync(audio_file)) {
         throw new Error(`Audio file not found: ${audio_file}`);
     }
 
     console.log(`[proc] Loading audio file: ${audio_file}`);
-    const { sample_rate: sample_rate, num_channels: num_channels, bits_per_sample: bitsPerSample, samples } = load_wav(audio_file);
+    const { sample_rate, num_channels, bits_per_sample, samples } = load_wav(audio_file);
 
-    const {
-        silence_threshold_ms: silence_threshold_ms,
-        rms_silence_threshold: rms_silence_threshold,
-        processing_window_ms: processing_window_ms,
-    } = config.audio;
+    const { processing_window_ms } = config.audio;
 
     const frames_per_window = Math.floor((sample_rate * processing_window_ms) / 1000);
     const samples_per_window = frames_per_window * num_channels;
@@ -115,10 +116,10 @@ export async function process_audio_file(siteId: string): Promise<void> {
     const duration_sec = total_frames / sample_rate;
 
     console.log(
-        `[proc] ${sample_rate} Hz, ${num_channels} ch, ${bitsPerSample}-bit` +
+        `[proc] ${sample_rate} Hz, ${num_channels} ch, ${bits_per_sample}-bit` +
             ` | ${total_frames} frames (${duration_sec.toFixed(2)}s)` +
             ` | window: ${processing_window_ms}ms (${frames_per_window} frames)` +
-            ` | silence: RMS<${rms_silence_threshold} for >${silence_threshold_ms}ms`
+            ` | silence: RMS<${rms_silence_threshold_db} for >${silence_threshold_ms}ms`
     );
 
     let chunk_samples: number[] = [];
@@ -132,7 +133,7 @@ export async function process_audio_file(siteId: string): Promise<void> {
     for (let offset = 0; offset < samples.length; offset += samples_per_window) {
         const window_samples = samples.slice(offset, offset + samples_per_window);
         const rms = compute_rms(window_samples, num_channels);
-        const is_silent = rms < rms_silence_threshold;
+        const is_silent = rms < rms_silence_threshold_db;
 
         if (!is_silent) {
             // Audio is active — accumulate into current chunk
@@ -149,7 +150,14 @@ export async function process_audio_file(siteId: string): Promise<void> {
 
                 if (silence_window_count >= silence_windows_needed) {
                     // Silence threshold reached — flush the accumulated chunk
-                    await flush_chunk(siteId, chunk_samples, chunk_start_time!, sample_rate, num_channels, bitsPerSample);
+                    await flush_chunk(
+                        site_id,
+                        chunk_samples,
+                        chunk_start_time!,
+                        sample_rate,
+                        num_channels,
+                        bits_per_sample
+                    );
                     chunk_samples = [];
                     chunk_start_time = null;
                     silence_window_count = 0;
@@ -166,8 +174,8 @@ export async function process_audio_file(siteId: string): Promise<void> {
 
         // Simulate real-time pacing: sleep until the simulated time catches up to
         // the wall-clock time we should be at
-        const targetWallTime = file_start_wall_time + simulated_elapsed_ms;
-        const sleepMs = targetWallTime - Date.now();
+        const target_wall_time = file_start_wall_time + simulated_elapsed_ms;
+        const sleepMs = target_wall_time - Date.now();
         if (sleepMs > 0) {
             await sleep(sleepMs);
         }
@@ -176,7 +184,7 @@ export async function process_audio_file(siteId: string): Promise<void> {
     // Flush any remaining audio at end-of-file
     if (chunk_samples.length > 0 && chunk_start_time !== null) {
         console.log("[proc] End of file — flushing final chunk");
-        await flush_chunk(siteId, chunk_samples, chunk_start_time, sample_rate, num_channels, bitsPerSample);
+        await flush_chunk(site_id, chunk_samples, chunk_start_time, sample_rate, num_channels, bits_per_sample);
     }
 
     console.log("[proc] Audio file processing complete.");

@@ -23,11 +23,10 @@ export const config = {
     mongo: {
         uri: require_env("MONGODB_URI"),
         db: require_env("MONGODB_DB"),
-        collection: require_env("MONGODB_COLLECTION"),
+        audio_collection: require_env("MONGODB_AUDIO_COLLECTION"),
+        site_collection: require_env("MONGODB_SITES_COLLECTION"),
     },
     audio: {
-        silence_threshold_ms: require_env_number("SILENCE_THRESHOLD_MS"),
-        rms_silence_threshold: require_env_number("RMS_SILENCE_THRESHOLD"),
         processing_window_ms: require_env_number("PROCESSING_WINDOW_MS"),
     },
 } as const;
